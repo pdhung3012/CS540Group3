@@ -8,7 +8,7 @@ int x, z = -10, zero;
 extern int e;
 void main()
 {
-   int y, z;
+   int y, z, a = 60, b = 13;;
 
    x = -4 + -2;
    //this switch case makes y equals to x, results to all correct tests
@@ -65,6 +65,24 @@ void main()
    print(i() + 2);
    println(" = 7");
    println("S6 test done");
+   //===============================================================
+   print(a&b);
+   println(" = 12");
+   print(a|b);
+   println(" = 61");
+   print(a^b);
+   println(" = 49");
+   print(~a);
+   println(" = -61");
+   print(2 + ~a);
+   println(" = -59");
+   print(a<<2);
+   println(" = 240");
+   print(a>>>2);
+   println(" = 15");
+   print(a>>2);
+   println(" = 15");
+   println("S7 test done");
 }
 int y = +2;
 void f(int x, int z)
