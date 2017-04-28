@@ -162,87 +162,73 @@ class R1djCodeGen
 {
   private PrintWriter outFile;
   private R1djSymTab st;
-  private int tempIndex,ac;
+  private int tempIndex, ac;
   //-----------------------------------------
   public R1djCodeGen(PrintWriter outFile, R1djSymTab st)
   {
     this.outFile = outFile;
     this.st = st;
     this.tempIndex = 0;
+    this.ac = -1;
   }
   //-----------------------------------------
   public int add(int left, int right)
   {
-    if(ac==left)
-    	emitInstruction("add",right);
-    else	
-	if(ac==right)
-		emitInstruction("add", left);
-	else
-	{
-	  if(st.isTemp(ac))
-	  {
-	    emitInstruction("st",ac);
-	    st.setNeedsdw(ac);
-	  }
-		emitLoad(left);
-		emitInstruction("add",right);	  
-	}
+    if (ac == left)
+    	emitInstruction("add", right);
+    else if (ac == right)
+    	emitInstruction("add", left);
+    else {
+      if (st.isTemp(ac))
+      {
+        emitInstruction("st", ac);
+        st.setNeedsdw(ac);
+      }
+      emitLoad(left);
+      emitInstruction("add", right);
+    }
 	freeTemp(left);
 	freeTemp(right);
 	int temp = getTemp();		// returns index
-	ac=temp;
-	//emitInstruction("st", temp);
+	ac = temp;
 	return temp;
   }
   //-----------------------------------------
   public int mult(int left, int right)
   {
-    if(ac==left)
-    	emitInstruction("mult",right);
-    else	
-	if(ac==right)
-		emitInstruction("mult", left);
-	else
-	{
-	  if(st.isTemp(ac))
-	  {
-	    emitInstruction("st",ac);
-	    st.setNeedsdw(ac);
-	  }
-		emitLoad(left);
-		emitInstruction("mult",right);	  
-	}
+	if (ac == left)
+    	emitInstruction("mult", right);
+    else if (ac == right)
+    	emitInstruction("mult", left);
+    else {
+      if (st.isTemp(ac))
+      {
+        emitInstruction("st", ac);
+        st.setNeedsdw(ac);
+      }
+      emitLoad(left);
+      emitInstruction("mult", right);
+    }
 	freeTemp(left);
 	freeTemp(right);
 	int temp = getTemp();		// returns index
-	ac=temp;
-	//emitInstruction("st", temp);
+	ac = temp;
 	return temp;
-    
-//	emitLoad(left);
-//	emitInstruction("mult", right);
-//	freeTemp(left);
-//	freeTemp(right);
-//	int temp = getTemp();		// returns index
-//	emitInstruction("st", temp);
-//	return temp;
   }
   //-----------------------------------------
   public void assign(int left, int expVal)
   {
-	    if(ac!=expVal) {
+    if (ac != expVal)
 		emitLoad(expVal);
-		
-  	}  
 	freeTemp(expVal);
 	emitInstruction("st", left);
-	ac=left;
+	ac = left;
   }
   //-----------------------------------------
   public void println(int expVal)
   {
-	emitLoad(expVal);
+    if (ac != expVal)
+		emitLoad(expVal);
 	freeTemp(expVal);
 	emitInstruction("dout");
 	emitInstruction("ldc", "'\\n'");
@@ -260,7 +246,7 @@ class R1djCodeGen
   public int getTemp()
   {
 	String temp = "@t" + tempIndex++;	// create temp
-	return st.enter(temp, "0", true);	// return index
+	return st.enter(temp, "0", false);	// return index
   }
   //-----------------------------------------
   private void freeTemp(int opndIndex)
@@ -282,9 +268,8 @@ class R1djCodeGen
   //-----------------------------------------
   public void emitInstruction(String op, int opndIndex)
   {
-    if(st.isConstant(opndIndex)) {
-		st.setNeedsdw(opndIndex);
-    }
+    if(st.isConstant(opndIndex))
+    	st.setNeedsdw(opndIndex);
     emitInstruction(op, st.getSymbol(opndIndex));
   }
   //-----------------------------------------
@@ -355,7 +340,7 @@ TOKEN:  // these tokens are returned to parser
    <ERROR: ~[]>  // matches any single character
 }
 
-// Translation grammar for R1dj and R1c ==================
+// Translation grammar for R1dj and R1d ==================
 
 void program(): {}
 {  
