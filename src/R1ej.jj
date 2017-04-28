@@ -1,0 +1,519 @@
+// R1ej.jj JavaCC input file for R1ej compiler
+options 
+{
+  STATIC = false;         // generate non-static methods
+
+  // set to true to debug token manager
+  COMMON_TOKEN_ACTION = false;   
+
+  // pass parser reference to the token manager
+  TOKEN_MANAGER_USES_PARSER = true; 
+}                                // end of options block
+//======================================================
+PARSER_BEGIN(R1ej)
+import java.io.*;
+import java.util.ArrayList;
+class R1ej
+{
+  private PrintWriter outFile;   
+  private R1ejSymTab st;
+  private R1ejCodeGen cg;
+  //-----------------------------------------
+  public static void main(String[] args) throws 
+                                             IOException
+  {
+    System.out.println("R1ej compiler written by Hung Phan, Sen Shen and Shir Lie Ooi");
+
+    if (args.length != 1)
+    {
+      System.err.println("Wrong number cmd line args");  
+      System.exit(1);
+    }
+
+    // build input and output file names
+    String inFileName = args[0] + ".s";
+    String outFileName = args[0] + ".a";
+
+    // construct file objects
+    FileInputStream inFile = 
+                       new FileInputStream(inFileName);
+    PrintWriter outFile = new PrintWriter(outFileName);
+
+    // identify compiler/author in output file
+    outFile.println("; R1ej compiler written by Hung Phan, Sen Shen and Shir Lie Ooi");
+    outFile.println("!register");
+
+    // construct objects that make up compiler
+    R1ejSymTab st = new R1ejSymTab();
+    R1ejCodeGen cg = new R1ejCodeGen(outFile, st);
+    R1ej parser = new R1ej(inFile);
+
+    // initialize parser's instance variables
+    parser.outFile = outFile;
+    parser.st = st;   
+    parser.cg = cg;
+
+    try 
+    {
+      parser.program();
+    }
+    catch(ParseException e) 
+    {
+      System.err.println(e.getMessage());
+      outFile.println(e.getMessage());
+      outFile.close();
+      System.exit(1);
+    }
+
+    outFile.close();
+  }
+  //-----------------------------------------
+  // If COMMON_TOKEN_ACTION is true, the token manager 
+  // calls makeComment for each token to create the
+  // token trace.
+  //
+  public void makeComment(Token t)
+  {
+    outFile.printf(
+      "; kd=%3d bL=%3d bC=%3d eL=%3d eC=%3d im= %s%n",
+       t.kind, t.beginLine, t.beginColumn, t.endLine, 
+       t.endColumn, t.image);
+  }
+}                                          // end of R1ej
+//======================================================
+class R1ejSymTab
+{
+  private ArrayList<String> symbol;
+  private ArrayList<String> dwValue;
+  private ArrayList<Boolean> needsdw;
+  //-----------------------------------------
+  public R1ejSymTab()
+  {
+    symbol = new ArrayList<String>();
+    dwValue = new ArrayList<String>();
+    needsdw = new ArrayList<Boolean>();
+  }
+  //-----------------------------------------
+  public int enter(String s, String v, Boolean b)
+  {
+    int index = symbol.indexOf(s);
+    if (index >= 0) 	// s already in symbol?
+    	return index; 	// yes, then return its index
+
+    index = symbol.size();
+    symbol.add(s);		// add symbol
+    dwValue.add(v);		// aa value
+    needsdw.add(b);		// add needsdw value
+    return index;
+  }
+  //-----------------------------------------
+  public String getSymbol(int i)
+  {
+    return symbol.get(i);
+  }
+  //-----------------------------------------
+  public String getdwValue(int i)
+  {
+    return dwValue.get(i);
+  }
+  //-----------------------------------------
+  public Boolean getNeedsdw(int i)
+  {
+    return needsdw.get(i);
+  }
+  //-----------------------------------------
+  public void setNeedsdw(int i)
+  {
+    needsdw.set(i, true);
+  }
+  //-----------------------------------------
+  public Boolean isConstant(int i)
+  {
+	if (i < 0) return false;
+	String s = symbol.get(i);
+	if (s.length() >= 2 && s.charAt(0) == '@' &&
+		(s.charAt(1) == '_' || Character.isDigit(s.charAt(1))))
+		return true;
+	else
+		return false;
+  }
+  //-----------------------------------------
+  public Boolean isldcConstant(int i)
+  {
+    if (isConstant(i)) 
+      if(Integer.parseInt(getdwValue(i)) >= 0 &&
+      	Integer.parseInt(getdwValue(i)) <= 4095)
+      	return true;
+	return false;
+  }
+  //-----------------------------------------
+  public Boolean isTemp(int opndIndex)
+  {
+    return getSymbol(opndIndex).startsWith("@t");
+  }
+  //-----------------------------------------
+  public int getSize()
+  {
+    return symbol.size();
+  }
+}                                    // end of R1ejSymTab
+//======================================================
+class R1ejCodeGen
+{
+  private PrintWriter outFile;
+  private R1ejSymTab st;
+  private int tempIndex;
+  private String previousOp;
+  private String previousOpnd;
+  private int previousOpndIndex;
+  //-----------------------------------------
+  public R1ejCodeGen(PrintWriter outFile, R1ejSymTab st)
+  {
+    this.outFile = outFile;
+    this.st = st;
+    this.tempIndex = 0;
+    this.previousOp = "?";
+    this.previousOpnd = "?";
+    this.previousOpndIndex = -1;
+  }
+  //-----------------------------------------
+  public void peephole(String op, int opndIndex)
+  {
+    String opnd = st.getSymbol(opndIndex);
+
+    //replace ld with ldc if possible
+    if(st.isConstant(opndIndex))
+    {
+      if(op.equals("ld") && Integer.parseInt(st.getdwValue(opndIndex)) >= 0 &&
+      	Integer.parseInt(st.getdwValue(opndIndex)) <= 4095)
+      	{
+      	  op = "ldc";
+      	  opnd = st.getdwValue(opndIndex);
+      	}
+      else
+      	st.setNeedsdw(opndIndex);
+    }
+
+    //check if okay not to emit current instruction
+    if (!(previousOp.equals("st") && op.equals("ld") && opnd.equals(previousOpnd) ||
+   		op.equals("st") && st.isTemp(opndIndex)))
+   	{
+   	  //must emit previous inst if st into temp
+   	  if(previousOp.equals("st") && st.isTemp(previousOpndIndex))
+   	  {
+   	    emitInstruction(previousOp, previousOpnd);
+   	    st.setNeedsdw(previousOpndIndex);
+   	  }
+   	  emitInstruction(op, opnd);
+   	}
+
+   	// save current instruction
+   	previousOp = op;
+    previousOpnd = opnd;
+    previousOpndIndex = opndIndex;
+  }
+  //-----------------------------------------
+  public void peephole(String op, String opnd)
+  {
+    if(previousOp.equals("st") && st.isTemp(previousOpndIndex))
+   	{
+   	  emitInstruction(previousOp, previousOpnd);
+   	  st.setNeedsdw(previousOpndIndex);
+   	}
+   	emitInstruction(op, opnd);
+
+   	// save current instruction
+   	previousOp = op;
+    previousOpnd = opnd;
+    previousOpndIndex = -1;
+  }
+  //-----------------------------------------
+  public void peephole(String op)
+  {
+    peephole(op, "");
+  }
+  //-----------------------------------------
+  public int add(int left, int right)
+  {
+    if (!st.isTemp(left) && st.isTemp(right))
+    {
+      peephole("ld", right);
+      peephole("add", left);
+    } else {
+      peephole("ld", left);
+      peephole("add", right);
+    }
+	freeTemp(left);
+	freeTemp(right);
+	int temp = getTemp();		// returns index
+	peephole("st", temp);
+	return temp;
+  }
+  //-----------------------------------------
+  public int mult(int left, int right)
+  {
+	if (!st.isTemp(left) && st.isTemp(right))
+    {
+      peephole("ld", right);
+      peephole("mult", left);
+    } else {
+      peephole("ld", left);
+      peephole("mult", right);
+    }
+	freeTemp(left);
+	freeTemp(right);
+	int temp = getTemp();		// returns index
+	peephole("st", temp);
+	return temp;
+  }
+  //-----------------------------------------
+  public void assign(int left, int expVal)
+  {
+    peephole("ld", expVal);
+	freeTemp(expVal);
+	peephole("st", left);
+  }
+  //-----------------------------------------
+  public void println(int expVal)
+  {
+    peephole("ld", expVal);
+	freeTemp(expVal);
+	peephole("dout");
+	peephole("ldc", "'\\n'");
+   	peephole("aout");
+  }
+  //-----------------------------------------
+  public void emitLoad(int opndIndex)
+  {
+    if(st.isldcConstant(opndIndex))
+    	emitInstruction("ldc", st.getdwValue(opndIndex));
+    else
+    	emitInstruction("ld", opndIndex);
+  }
+  //-----------------------------------------
+  public int getTemp()
+  {
+	String temp = "@t" + tempIndex++;	// create temp
+	return st.enter(temp, "0", false);	// return index
+  }
+  //-----------------------------------------
+  private void freeTemp(int opndIndex)
+  {
+    if (st.isTemp(opndIndex))
+    	tempIndex--;
+  }
+  //-----------------------------------------
+  public void emitInstruction(String op)
+  {
+    outFile.printf("          %-4s%n", op); 
+  }
+  //-----------------------------------------
+  public void emitInstruction(String op, String opnd)
+  {
+    outFile.printf(
+                  "          %-4s      %s%n", op, opnd); 
+  }
+  //-----------------------------------------
+  public void emitInstruction(String op, int opndIndex)
+  {
+    if(st.isConstant(opndIndex))
+    	st.setNeedsdw(opndIndex);
+    emitInstruction(op, st.getSymbol(opndIndex));
+  }
+  //-----------------------------------------
+  public void emitdw(String label, String value)
+  {
+    outFile.printf(
+             "%-9s dw        %s%n", label + ":", value);
+  }
+  //-----------------------------------------
+  public void endCode()
+  {
+    outFile.println();
+    emitInstruction("halt");
+
+    int size = st.getSize();
+    // emit dw for each symbol in the symbol table
+    for (int i=0; i < size; i++)
+    	if(st.getNeedsdw(i))
+      		emitdw(st.getSymbol(i), st.getdwValue(i));
+  }
+}                             // end of R1ejCodeGen class
+PARSER_END(R1ej)
+
+// Specification of the R1ej token manager ==============
+
+TOKEN_MGR_DECLS:
+{
+  // called for each token returned to parser
+  void CommonTokenAction(Token t)
+  {
+    parser.makeComment(t);
+  }
+}
+//------------------------------
+SKIP:  // these tokens are not returned to parser
+{
+   " " 
+ | 
+   "\n" 
+ | 
+   "\r" 
+ | 
+   "\t"
+}
+//------------------------------
+TOKEN:  // these tokens are returned to parser
+{
+   <PRINTLN: "println">  // must precede <ID> 
+ |
+   <UNSIGNED: (["0"-"9"])+> 
+ |
+   <ID: ["A"-"Z","a"-"z"] (["A"-"Z","a"-"z","0"-"9"])*>
+ |
+   <ASSIGN: "=">
+ |
+   <SEMICOLON: ";">
+ |
+   <LEFTPAREN: "(">
+ |
+   <RIGHTPAREN: ")">
+ |
+   <PLUS: "+">
+ |
+   <MINUS: "-">
+ |
+   <TIMES: "*">
+ |
+   <ERROR: ~[]>  // matches any single character
+}
+
+// Translation grammar for R1ej and R1e ==================
+
+void program(): {}
+{  
+   statementList() 
+   {cg.endCode();}
+   <EOF>
+}
+//------------------------------
+void statementList(): {} 
+{
+   statement() 
+   statementList()  
+ |  
+   {}
+}    
+//------------------------------
+void statement(): {} 
+{
+   assignmentStatement()
+ |
+   printlnStatement()
+}
+//------------------------------
+void assignmentStatement(): {Token t; int left, expVal;}
+{
+    t=<ID>  
+    {left = st.enter(t.image, "0", true);} 
+    "="
+    expVal=expr()
+    {cg.assign(left, expVal);}
+    ";"
+}
+//------------------------------
+void printlnStatement(): {int expVal;}
+{
+    "println"
+    "("
+    expVal = expr()
+    {cg.println(expVal);}
+    ")"
+    ";"
+}
+//------------------------------
+int expr(): {int left, expVal;}
+{
+   left=term()
+   expVal=termList(left)
+   {return expVal;}
+}
+//------------------------------
+int termList(int left): {int right, temp, expVal, leftValue, rightValue, result;}
+{
+   "+"
+   right=term()
+   { if (st.isConstant(left) && st.isConstant(right))
+   {
+     leftValue = Integer.parseInt(st.getdwValue(left));
+     rightValue = Integer.parseInt(st.getdwValue(right));
+     result = leftValue + rightValue;
+     if (result >= 0)
+     	temp = st.enter("@" + result, "" + result, false);
+     else
+     	temp = st.enter("@_" + -result, "" + result, false);
+   } else {
+     temp = cg.add(left, right);
+   } }
+   expVal=termList(temp)
+   {return expVal;}
+ |  
+   {return left;}
+}
+//------------------------------
+int term(): {int left, termVal;}
+{
+   left=factor()
+   termVal=factorList(left)
+   {return termVal;}
+}
+//------------------------------
+int factorList(int left): {int right, temp, termVal, leftValue, rightValue, result;}
+{
+   "*"  
+   right=factor()
+   {
+   if (st.isConstant(left) && st.isConstant(right)) {
+     leftValue = Integer.parseInt(st.getdwValue(left));
+     rightValue = Integer.parseInt(st.getdwValue(right));
+     result = leftValue * rightValue;
+     if (result >= 0) { 
+     	temp = st.enter("@" + result, "" + result, false);
+   	 } else { 
+     	temp = st.enter("@_" + -result, "" + result, false);
+     }
+   } else {
+      temp = cg.mult(left, right);
+   }
+   }
+   termVal=factorList(temp)
+   {return termVal;}
+ |  
+   {return left;}
+}
+//------------------------------
+int factor(): {Token t; int index;} 
+{
+   t=<UNSIGNED> 
+   {index = st.enter("@" + t.image, t.image, true);}
+   {return index;}
+ |
+   "+"
+   t = <UNSIGNED>
+   {index = st.enter("@" + t.image, t.image, true);}
+   {return index;}
+ |
+   "-"
+   t = <UNSIGNED>
+   {index = st.enter("@_" + t.image, "-" + t.image, true);}
+   {return index;}
+ |
+   t=<ID> 
+   {index = st.enter(t.image, "0", true);}
+   {return index;}
+ |  
+   "(" 
+   index=expr() 
+   ")"
+   {return index;}
+}
